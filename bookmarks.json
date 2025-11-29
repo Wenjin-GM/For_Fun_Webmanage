@@ -5,8 +5,9 @@
             "url": "https://chatgpt.com"
         },
         {
-            "name": "Gemini",
-            "url": "https://gemini.google.com"
+            "name": "ChatGPT",
+            "url": "https://chatgpt.com",
+            "note": "asgasgasg"
         }
     ],
     "学习资料": [],
