@@ -1,20 +1,78 @@
 {
     "AI": [
         {
-            "name": "ChatGPT",
-            "url": "https://chatgpt.com"
+            "name": "Gemini",
+            "url": "https://gemini.google.com/",
+            "note": ""
         },
         {
             "name": "ChatGPT",
-            "url": "https://chatgpt.com",
-            "note": "asgasgasg"
+            "url": "https://chatgpt.com/",
+            "note": ""
+        },
+        {
+            "name": "Claude",
+            "url": "https://claude.ai/",
+            "note": ""
+        },
+        {
+            "name": "Grok",
+            "url": "https://grok.com/",
+            "note": ""
+        },
+        {
+            "name": "Minimax",
+            "url": "https://www.minimaxi.com/",
+            "note": ""
+        },
+        {
+            "name": "deevid",
+            "url": "https://deevid.ai/",
+            "note": "成图成视频"
         }
     ],
-    "学习资料": [],
-    "常用工具": [
+    "仓库与论坛": [
         {
-            "name": "Google",
-            "url": "https://www.google.com"
+            "name": "L站",
+            "url": "https://linux.do",
+            "note": ""
+        },
+        {
+            "name": "CSDN",
+            "url": "https://www.csdn.net/",
+            "note": ""
+        },
+        {
+            "name": "Gitee",
+            "url": "https://gitee.com/",
+            "note": ""
+        },
+        {
+            "name": "Github",
+            "url": "https://github.com/",
+            "note": ""
+        }
+    ],
+    "科学": [
+        {
+            "name": "云游",
+            "url": "https://yyoos.cc/",
+            "note": ""
+        },
+        {
+            "name": "渔云",
+            "url": "https://cloudfisher.top",
+            "note": ""
+        },
+        {
+            "name": "樱花猫",
+            "url": "https://sakura-cat1.com",
+            "note": ""
+        },
+        {
+            "name": "猫娘",
+            "url": "https://zodacc.com",
+            "note": ""
         }
     ]
 }
