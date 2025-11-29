@@ -3,6 +3,8 @@ from tkinter import ttk, messagebox, simpledialog
 import webbrowser
 import json
 import os
+import functools
+import subprocess  # 新增：用于启动外部浏览器进程
 
 # === 全局配置 ===
 COLORS = {
@@ -12,9 +14,6 @@ COLORS = {
     "bg_gray": "#F5F7FA",
     "text_dark": "#333333",
     "text_light": "#FFFFFF",
-    "ghost_bg": "#4A90E2",
-    "ghost_alpha": 0.8,
-    "indicator": "#4A90E2"
 }
 
 FONTS = {
@@ -23,6 +22,42 @@ FONTS = {
     "body_bold": ("Microsoft YaHei UI", 10, "bold"),
     "small": ("Microsoft YaHei UI", 9)
 }
+
+# === 浏览器路径配置 (Windows 常用路径) ===
+# 程序启动时会自动检测这些路径是否存在
+POTENTIAL_BROWSERS = {
+    "Chrome": [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe")
+    ],
+    "Edge": [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+    ],
+    "Firefox": [
+        r"C:\Program Files\Mozilla Firefox\firefox.exe",
+        r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe"
+    ],
+    "Brave": [
+        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
+    ]
+}
+
+
+# === 防崩溃安全网 ===
+def safe_action(func):
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return func(self, *args, **kwargs)
+        except Exception as e:
+            print(f"⚠️ 操作异常 [{func.__name__}]: {e}")
+            self.refresh_group_list()
+            if self.current_active_group:
+                self.refresh_site_list(self.current_active_group)
+
+    return wrapper
 
 
 class ModernButton(tk.Button):
@@ -43,7 +78,7 @@ class ModernButton(tk.Button):
 class WebManagerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("✨ 网站收藏管理器 (稳定版)")
+        self.root.title("✨ 网站收藏管理器 (多浏览器版)")
         self.root.geometry("900x600")
         self.root.configure(bg=COLORS["bg_light"])
 
@@ -52,19 +87,8 @@ class WebManagerApp:
         self.context_item_site = None
         self.context_item_group = None
 
-        # === 拖拽核心变量 ===
-        self.drag_data = {
-            "item": None,  # 被拖拽的 item ID
-            "parent": "",  # 原始父节点 (用于恢复)
-            "index": 0,  # 原始索引 (用于恢复)
-            "y": 0,  # 初始 Y 坐标
-            "ghost": None,  # 幽灵窗口
-            "indicator": None,  # 插入指示线
-            "tree": None,  # 当前操作的 Treeview
-            "is_group": False,  # 是否是分组
-            "drop_target": None,  # 放置目标 ID
-            "drop_pos": "after"  # 放置位置
-        }
+        # === 检测已安装的浏览器 ===
+        self.available_browsers = self.detect_browsers()
 
         self.configure_styles()
         self.data_file = "bookmarks.json"
@@ -74,6 +98,16 @@ class WebManagerApp:
             self.current_active_group = list(self.data.keys())[0]
 
         self.setup_ui()
+
+    def detect_browsers(self):
+        """检测系统中实际存在的浏览器"""
+        found = {}
+        for name, paths in POTENTIAL_BROWSERS.items():
+            for path in paths:
+                if os.path.exists(path):
+                    found[name] = path
+                    break  # 找到一个路径即可
+        return found
 
     def configure_styles(self):
         style = ttk.Style()
@@ -112,11 +146,8 @@ class WebManagerApp:
 
         self.group_tree.bind("<Motion>", self.on_group_hover)
         self.group_tree.bind("<Leave>", self.on_group_leave)
+        self.group_tree.bind("<Button-1>", self.handle_group_click)
         self.group_tree.bind("<Button-3>", self.show_group_menu)
-
-        self.group_tree.bind("<ButtonPress-1>", lambda e: self.on_press(e, self.group_tree, is_group=True))
-        self.group_tree.bind("<B1-Motion>", self.on_motion)
-        self.group_tree.bind("<ButtonRelease-1>", self.on_release)
 
         self.group_tree.tag_configure("active_group", font=FONTS["body_bold"], foreground=COLORS["primary"])
         self.group_tree.tag_configure("normal_group", font=FONTS["body"])
@@ -133,7 +164,7 @@ class WebManagerApp:
         header_frame.pack(fill=tk.X, padx=20, pady=(20, 10))
         tk.Label(header_frame, text="🌐 网站列表", bg=COLORS["bg_light"], fg=COLORS["text_dark"], font=FONTS["h1"]).pack(
             side=tk.LEFT)
-        tk.Label(header_frame, text="(按住拖拽，松手插入)", bg=COLORS["bg_light"], fg="#999999",
+        tk.Label(header_frame, text="(右键选择打开方式)", bg=COLORS["bg_light"], fg="#999999",
                  font=FONTS["small"]).pack(side=tk.LEFT, padx=10, pady=5)
         ModernButton(header_frame, text="+ 添加网站", command=self.add_website, width=12).pack(side=tk.RIGHT)
 
@@ -154,11 +185,8 @@ class WebManagerApp:
 
         self.site_tree.bind("<Motion>", self.on_site_hover)
         self.site_tree.bind("<Leave>", self.on_site_leave)
+        self.site_tree.bind("<Button-1>", self.handle_site_click)
         self.site_tree.bind("<Button-3>", self.show_site_menu)
-
-        self.site_tree.bind("<ButtonPress-1>", lambda e: self.on_press(e, self.site_tree, is_group=False))
-        self.site_tree.bind("<B1-Motion>", self.on_motion)
-        self.site_tree.bind("<ButtonRelease-1>", self.on_release)
 
         self.site_tree.tag_configure("even", background="#FAFAFA")
         self.site_tree.tag_configure("odd", background=COLORS["bg_light"])
@@ -168,168 +196,105 @@ class WebManagerApp:
         if self.current_active_group:
             self.refresh_site_list(self.current_active_group)
 
-    # === 拖拽视觉逻辑 ===
+    # === 【关键更新】 上下文菜单 ===
 
-    def create_ghost_window(self, text):
-        if self.drag_data["ghost"]: self.drag_data["ghost"].destroy()
-        ghost = tk.Toplevel(self.root)
-        ghost.overrideredirect(True)
-        ghost.attributes("-alpha", COLORS["ghost_alpha"])
-        ghost.attributes("-topmost", True)
-        label = tk.Label(ghost, text=text, bg=COLORS["ghost_bg"], fg="white",
-                         font=FONTS["body"], padx=10, pady=5, relief="solid", bd=1)
-        label.pack()
-        self.drag_data["ghost"] = ghost
+    def create_context_menus(self):
+        # 分组菜单
+        self.group_menu = tk.Menu(self.root, tearoff=0, font=FONTS["body"])
+        self.group_menu.add_command(label="✏️ 重命名", command=self.rename_group)
+        self.group_menu.add_command(label="🗑️ 删除分组", command=self.delete_group)
+        self.group_menu.add_separator()
+        self.group_menu.add_command(label="⬆️ 上移", command=lambda: self.move_item(self.group_tree, True, "up"))
+        self.group_menu.add_command(label="⬇️ 下移", command=lambda: self.move_item(self.group_tree, True, "down"))
 
-    def create_indicator(self):
-        if self.drag_data["indicator"]: self.drag_data["indicator"].destroy()
-        indicator = tk.Toplevel(self.root)
-        indicator.overrideredirect(True)
-        indicator.attributes("-topmost", True)
-        indicator.configure(bg=COLORS["indicator"])
-        indicator.geometry("100x2+0+0")
-        self.drag_data["indicator"] = indicator
+        # 网站菜单
+        self.site_menu = tk.Menu(self.root, tearoff=0, font=FONTS["body"])
 
-    def update_ghost_position(self, x_root, y_root):
-        if self.drag_data["ghost"]:
-            self.drag_data["ghost"].geometry(f"+{x_root + 15}+{y_root + 15}")
+        # --- 子菜单：打开方式 ---
+        # 如果检测到了任何浏览器，就创建子菜单
+        if self.available_browsers:
+            self.browser_submenu = tk.Menu(self.site_menu, tearoff=0, font=FONTS["body"])
+            self.site_menu.add_cascade(label="🚀 打开方式 (Open With)", menu=self.browser_submenu)
 
-    def on_press(self, event, tree, is_group):
-        item = tree.identify_row(event.y)
-        if item:
-            self.drag_data["item"] = item
-            self.drag_data["parent"] = tree.parent(item)
-            self.drag_data["index"] = tree.index(item)
-            self.drag_data["y"] = event.y
-            self.drag_data["tree"] = tree
-            self.drag_data["is_group"] = is_group
-            # 每次按下前，重置这些状态，防止污染
-            self.drag_data["ghost"] = None
-            self.drag_data["indicator"] = None
-            self.drag_data["drop_target"] = None
+            # 添加“默认浏览器”选项
+            self.browser_submenu.add_command(label="💻 系统默认", command=lambda: self.open_with_browser("Default"))
+            self.browser_submenu.add_separator()
 
-    def on_motion(self, event):
-        if not self.drag_data["item"]: return
+            # 动态添加检测到的浏览器
+            for b_name, b_path in self.available_browsers.items():
+                # 使用 lambda 闭包捕获参数
+                self.browser_submenu.add_command(label=f"🌐 {b_name}",
+                                                 command=lambda p=b_path: self.open_with_browser(p))
 
-        # 1. 触发拖拽 (Detach)
-        if not self.drag_data["ghost"] and abs(event.y - self.drag_data["y"]) > 5:
-            tree = self.drag_data["tree"]
-            item = self.drag_data["item"]
+            self.site_menu.add_separator()
+        # ---------------------
 
-            # 安全检查：确保 item 存在
-            if not tree.exists(item): return
+        self.site_menu.add_command(label="✏️ 编辑", command=self.edit_website)
+        self.site_menu.add_command(label="🗑️ 删除", command=self.delete_website)
+        self.site_menu.add_separator()
+        self.site_menu.add_command(label="⬆️ 上移", command=lambda: self.move_item(self.site_tree, False, "up"))
+        self.site_menu.add_command(label="⬇️ 下移", command=lambda: self.move_item(self.site_tree, False, "down"))
+        self.site_menu.add_command(label="🔝 置顶", command=lambda: self.move_item(self.site_tree, False, "top"))
+        self.site_menu.add_command(label="BOTTOM 置底", command=lambda: self.move_item(self.site_tree, False, "bottom"))
 
-            item_text = ""
-            if self.drag_data["is_group"]:
-                item_text = tree.item(item, "text")
-            else:
-                vals = tree.item(item, "values")
-                if vals: item_text = f"{vals[0]} - {vals[1]}"
+    # === 【新功能】 浏览器启动逻辑 ===
 
-            self.create_ghost_window(item_text)
-            self.create_indicator()
-            tree.configure(cursor="fleur")
+    @safe_action
+    def open_with_browser(self, browser_path):
+        """使用指定浏览器打开当前选中的网站"""
+        # 获取当前选中的 URL
+        # 注意：这里我们使用 context_item_site (右键时的行)
+        item_id = self.context_item_site
+        if not item_id:
+            # 容错：如果右键没抓到，尝试取 selection
+            sel = self.site_tree.selection()
+            if sel: item_id = sel[0]
 
-            # 【Detach】 将行从视图中暂时移除
-            tree.detach(item)
+        if not item_id: return
 
-        # 2. 拖拽过程中
-        if self.drag_data["ghost"]:
-            tree = self.drag_data["tree"]
-            self.update_ghost_position(event.x_root, event.y_root)
+        item = self.site_tree.item(item_id)
+        url = item['values'][1]
 
-            target_id = tree.identify_row(event.y)
-
-            # 只有当 target_id 存在且有效时才显示指示线
-            if target_id:
-                bbox = tree.bbox(target_id)
-                if bbox:
-                    row_y = bbox[1]
-                    row_h = bbox[3]
-                    mouse_y_in_row = event.y - row_y
-
-                    line_x = tree.winfo_rootx() + bbox[0]
-                    line_w = bbox[2]
-                    line_h = 2
-
-                    if mouse_y_in_row < row_h / 2:
-                        line_y = tree.winfo_rooty() + row_y
-                        self.drag_data["drop_target"] = target_id
-                        self.drag_data["drop_pos"] = "before"
-                    else:
-                        line_y = tree.winfo_rooty() + row_y + row_h
-                        self.drag_data["drop_target"] = target_id
-                        self.drag_data["drop_pos"] = "after"
-
-                    if self.drag_data["indicator"]:
-                        self.drag_data["indicator"].geometry(f"{line_w}x{line_h}+{line_x}+{line_y}")
-                        self.drag_data["indicator"].deiconify()
-            else:
-                # 鼠标在空白处，隐藏指示线，target 设为 None
-                if self.drag_data["indicator"]:
-                    self.drag_data["indicator"].withdraw()
-                    self.drag_data["drop_target"] = None
-
-    # === 【关键修复】 释放与异常恢复逻辑 ===
-    def on_release(self, event):
-        # 1. 清理视觉元素
-        if self.drag_data["ghost"]:
-            self.drag_data["ghost"].destroy()
-            self.drag_data["ghost"] = None
-        if self.drag_data["indicator"]:
-            self.drag_data["indicator"].destroy()
-            self.drag_data["indicator"] = None
-
-        if self.drag_data["tree"]:
-            self.drag_data["tree"].configure(cursor="")
-
-        # 2. 判断是否发生了拖拽
-        tree = self.drag_data["tree"]
-        item = self.drag_data["item"]
-
-        # 简单判定：如果有位移，说明触发了拖拽逻辑
-        was_dragged = abs(event.y - self.drag_data["y"]) > 5
-
-        if was_dragged and item:
-            # === 尝试执行移动 ===
-            try:
-                target = self.drag_data["drop_target"]
-                pos = self.drag_data["drop_pos"]
-
-                # 如果有有效目标，移动到新位置
-                if target:
-                    if pos == "before":
-                        tree.move(item, tree.parent(target), tree.index(target))
-                    else:
-                        tree.move(item, tree.parent(target), tree.index(target) + 1)
-
-                    # 同步数据
-                    self.sync_order_after_drag(item)
-                else:
-                    # 【无有效目标】：恢复原位 (Restore)
-                    # print("Drop target invalid, restoring...")
-                    tree.move(item, self.drag_data["parent"], self.drag_data["index"])
-
-            except Exception as e:
-                # 【发生任何错误】：强制恢复原位，防止程序崩溃或 item 消失
-                print(f"Drag Error: {e}")  # 调试用
-                try:
-                    tree.move(item, self.drag_data["parent"], self.drag_data["index"])
-                except:
-                    pass  # 如果恢复也失败（极少见），不做处理防止弹窗报错
-
+        if browser_path == "Default":
+            webbrowser.open(url)
         else:
-            # === 只是点击 (未触发拖拽) ===
-            # 注意：因为没有 detach，所以不需要 restore
-            if self.drag_data["is_group"]:
-                self.handle_group_click(event)
-            else:
-                self.handle_site_click(event)
+            # 使用 subprocess 调用外部 exe 打开 url
+            try:
+                subprocess.Popen([browser_path, url])
+            except Exception as e:
+                messagebox.showerror("启动失败", f"无法启动浏览器：\n{e}")
 
-        self.drag_data["item"] = None
+    # === 移动逻辑 ===
 
-    def sync_order_after_drag(self, moved_item_id):
-        if self.drag_data["is_group"]:
+    @safe_action
+    def move_item(self, tree, is_group, direction):
+        item = self.context_item_group if is_group else self.context_item_site
+        if not item:
+            sel = tree.selection()
+            if sel: item = sel[0]
+
+        if not item: return
+
+        parent = tree.parent(item)
+        current_idx = tree.index(item)
+        total_items = len(tree.get_children(parent))
+        target_idx = current_idx
+
+        if direction == "up":
+            if current_idx > 0: target_idx = current_idx - 1
+        elif direction == "down":
+            if current_idx < total_items - 1: target_idx = current_idx + 1
+        elif direction == "top":
+            target_idx = 0
+        elif direction == "bottom":
+            target_idx = total_items
+
+        if target_idx != current_idx:
+            tree.move(item, parent, target_idx)
+            self.sync_data_order(is_group)
+
+    def sync_data_order(self, is_group):
+        if is_group:
             new_keys = self.group_tree.get_children()
             new_data = {}
             for key in new_keys:
@@ -341,11 +306,8 @@ class WebManagerApp:
         else:
             if not self.current_active_group: return
             new_order_ids = self.site_tree.get_children()
-
             old_site_list = self.data[self.current_active_group]
             new_site_list = []
-
-            # 根据 iid 映射回原始数据
             for iid in new_order_ids:
                 try:
                     original_index = int(iid)
@@ -353,59 +315,24 @@ class WebManagerApp:
                         new_site_list.append(old_site_list[original_index])
                 except:
                     pass
-
             self.data[self.current_active_group] = new_site_list
             self.save_data()
-            # 刷新以重置 iid，确保下次拖拽逻辑正确
             self.refresh_site_list(self.current_active_group)
 
-    # === 原有的辅助逻辑 ===
+    # === 基础交互 ===
 
-    def create_context_menus(self):
-        self.group_menu = tk.Menu(self.root, tearoff=0, font=FONTS["body"])
-        self.group_menu.add_command(label="✏️ 重命名", command=self.rename_group)
-        self.group_menu.add_separator()
-        self.group_menu.add_command(label="🗑️ 删除分组", command=self.delete_group)
-
-        self.site_menu = tk.Menu(self.root, tearoff=0, font=FONTS["body"])
-        self.site_menu.add_command(label="✏️ 编辑", command=self.edit_website)
-        self.site_menu.add_separator()
-        self.site_menu.add_command(label="🗑️ 删除", command=self.delete_website)
-
+    @safe_action
     def on_group_hover(self, event):
-        if self.drag_data["ghost"]: return
         item_id = self.group_tree.identify_row(event.y)
         if item_id and item_id not in self.group_tree.selection():
             self.group_tree.selection_set(item_id)
 
+    @safe_action
     def on_group_leave(self, event):
-        if not self.drag_data["ghost"] and self.group_tree.selection():
+        if self.group_tree.selection():
             self.group_tree.selection_remove(self.group_tree.selection())
 
-    def show_group_menu(self, event):
-        item_id = self.group_tree.identify_row(event.y)
-        if item_id:
-            self.context_item_group = item_id
-            self.group_tree.selection_set(item_id)
-            self.group_menu.post(event.x_root, event.y_root)
-
-    def on_site_hover(self, event):
-        if self.drag_data["ghost"]: return
-        item_id = self.site_tree.identify_row(event.y)
-        if item_id and item_id not in self.site_tree.selection():
-            self.site_tree.selection_set(item_id)
-
-    def on_site_leave(self, event):
-        if not self.drag_data["ghost"] and self.site_tree.selection():
-            self.site_tree.selection_remove(self.site_tree.selection())
-
-    def show_site_menu(self, event):
-        item_id = self.site_tree.identify_row(event.y)
-        if item_id:
-            self.context_item_site = item_id
-            self.site_tree.selection_set(item_id)
-            self.site_menu.post(event.x_root, event.y_root)
-
+    @safe_action
     def handle_group_click(self, event):
         item_id = self.group_tree.identify_row(event.y)
         if item_id:
@@ -413,12 +340,43 @@ class WebManagerApp:
             self.refresh_group_list()
             self.refresh_site_list(self.current_active_group)
 
+    @safe_action
+    def show_group_menu(self, event):
+        item_id = self.group_tree.identify_row(event.y)
+        if item_id:
+            self.context_item_group = item_id
+            self.group_tree.selection_set(item_id)
+            self.group_menu.post(event.x_root, event.y_root)
+
+    @safe_action
+    def on_site_hover(self, event):
+        item_id = self.site_tree.identify_row(event.y)
+        if item_id and item_id not in self.site_tree.selection():
+            self.site_tree.selection_set(item_id)
+
+    @safe_action
+    def on_site_leave(self, event):
+        if self.site_tree.selection():
+            self.site_tree.selection_remove(self.site_tree.selection())
+
+    @safe_action
     def handle_site_click(self, event):
         item_id = self.site_tree.identify_row(event.y)
         if item_id:
             item = self.site_tree.item(item_id)
             url = item['values'][1]
+            # 默认点击仍然使用系统默认浏览器
             webbrowser.open(url)
+
+    @safe_action
+    def show_site_menu(self, event):
+        item_id = self.site_tree.identify_row(event.y)
+        if item_id:
+            self.context_item_site = item_id
+            self.site_tree.selection_set(item_id)
+            self.site_menu.post(event.x_root, event.y_root)
+
+    # === 界面刷新与增删改 ===
 
     def refresh_group_list(self):
         sel = self.group_tree.selection()
@@ -439,6 +397,7 @@ class WebManagerApp:
             tag = "even" if i % 2 == 0 else "odd"
             self.site_tree.insert("", tk.END, iid=str(i), values=(site["name"], site["url"]), tags=(tag,))
 
+    @safe_action
     def add_group(self):
         name = simpledialog.askstring("新建分组", "请输入分组名称：")
         if name and name not in self.data:
@@ -448,6 +407,7 @@ class WebManagerApp:
             self.refresh_group_list()
             self.refresh_site_list(name)
 
+    @safe_action
     def add_website(self):
         add_window = tk.Toplevel(self.root)
         add_window.title("添加新网站")
@@ -455,13 +415,10 @@ class WebManagerApp:
         self.center_window(add_window, 420, 300)
 
         current_selection = self.group_tree.selection()
-        # 这里需要处理 selection 为空或为 tuple 的情况
         if current_selection:
-            # Treeview selection is tuple
             default_group = current_selection[0]
         else:
             default_group = self.current_active_group if self.current_active_group else ""
-
         existing_groups = list(self.data.keys())
 
         def create_input(label_text, y_pos):
@@ -487,9 +444,7 @@ class WebManagerApp:
             name = entry_name.get().strip()
             url = entry_url.get().strip()
             group = combo_group.get().strip()
-            if not name or not url or not group:
-                messagebox.showwarning("提示", "请填写完整信息", parent=add_window)
-                return
+            if not name or not url or not group: return
             if group not in self.data:
                 self.data[group] = []
                 self.refresh_group_list()
@@ -499,11 +454,9 @@ class WebManagerApp:
                 self.refresh_site_list(group)
             add_window.destroy()
 
-        btn_confirm = ModernButton(add_window, text="确认添加", command=confirm_add, width=12)
-        btn_confirm.place(x=80, y=220)
-        btn_cancel = ModernButton(add_window, text="取消", command=add_window.destroy, width=12, bg="#E0E0E0",
-                                  fg=COLORS["text_dark"])
-        btn_cancel.place(x=220, y=220)
+        ModernButton(add_window, text="确认添加", command=confirm_add, width=12).place(x=80, y=220)
+        ModernButton(add_window, text="取消", command=add_window.destroy, width=12, bg="#E0E0E0",
+                     fg=COLORS["text_dark"]).place(x=220, y=220)
 
     def center_window(self, win, width, height):
         screen_width = win.winfo_screenwidth()
@@ -512,6 +465,7 @@ class WebManagerApp:
         y = int((screen_height / 2) - (height / 2))
         win.geometry(f"{width}x{height}+{x}+{y}")
 
+    @safe_action
     def rename_group(self):
         t = self.context_item_group or self.current_active_group
         if not t: return
@@ -527,6 +481,7 @@ class WebManagerApp:
             self.refresh_group_list()
             self.refresh_site_list(self.current_active_group)
 
+    @safe_action
     def delete_group(self):
         t = self.context_item_group or self.current_active_group
         if t and messagebox.askyesno("确认", "删除?"):
@@ -540,6 +495,7 @@ class WebManagerApp:
             else:
                 [self.site_tree.delete(i) for i in self.site_tree.get_children()]
 
+    @safe_action
     def edit_website(self):
         item_id = self.context_item_site if self.context_item_site else self.site_tree.selection()
         if not item_id: return
@@ -554,6 +510,7 @@ class WebManagerApp:
             self.save_data()
             self.refresh_site_list(group_name)
 
+    @safe_action
     def delete_website(self):
         item_id = self.context_item_site if self.context_item_site else self.site_tree.selection()
         if not item_id: return
