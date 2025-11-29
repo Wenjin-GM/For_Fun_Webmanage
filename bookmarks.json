@@ -1,12 +1,4 @@
 {
-    "常用工具": [
-        {
-            "name": "Google",
-            "url": "https://www.google.com"
-        }
-    ],
-    "学习资料": [],
-    "娱乐": [],
     "AI": [
         {
             "name": "Gemini",
@@ -15,6 +7,13 @@
         {
             "name": "ChatGPT",
             "url": "https://chatgpt.com"
+        }
+    ],
+    "学习资料": [],
+    "常用工具": [
+        {
+            "name": "Google",
+            "url": "https://www.google.com"
         }
     ]
 }
